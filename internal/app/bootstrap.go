@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/che1nov/gopulse/internal/adapters/gotest"
@@ -139,6 +140,7 @@ func report(ctx context.Context, args []string, cfg usecases.Config, uc usecases
 
 func doctor(ctx context.Context, cfg usecases.Config, runner gotest.Runner, store usecases.BaselineStorage, stdout, stderr io.Writer) int {
 	moduleOK := fileExists("go.mod")
+	nestedModules := findNestedModules(".")
 	packages, packageErr := runner.Packages(ctx, cfg.Benchmark.Packages)
 	benchmarks, benchmarkErr := runner.BenchmarkFileCount(ctx, cfg.Benchmark.Packages)
 	pprofFound := runner.HasImport(ctx, cfg.Benchmark.Packages, "net/http/pprof") || runner.HasImport(ctx, cfg.Benchmark.Packages, "runtime/pprof")
@@ -150,6 +152,7 @@ func doctor(ctx context.Context, cfg usecases.Config, runner gotest.Runner, stor
 		fmt.Fprintf(stdout, "Packages found: %d\n", len(packages))
 	}
 	fmt.Fprintf(stdout, "Benchmarks found: %d\n", benchmarks)
+	fmt.Fprintf(stdout, "Nested modules: %d\n", len(nestedModules))
 	fmt.Fprintf(stdout, "Baseline found: %s\n", status(store.Exists(cfg.BaselinePath)))
 	fmt.Fprintln(stdout, "Benchmem enabled: OK")
 	fmt.Fprintf(stdout, "CI config: %s\n", status(fileExists(".github/workflows/performance.yml") || fileExists(".github/workflows/performance.yaml")))
@@ -157,6 +160,7 @@ func doctor(ctx context.Context, cfg usecases.Config, runner gotest.Runner, stor
 
 	if packageErr != nil {
 		fmt.Fprintln(stderr, formatCommandError("inspect packages", packageErr))
+		printNestedModuleHint(stderr, nestedModules)
 		return 1
 	}
 	if benchmarkErr != nil {
@@ -173,7 +177,7 @@ func doctor(ctx context.Context, cfg usecases.Config, runner gotest.Runner, stor
 func formatCommandError(operation string, err error) string {
 	var noPackages gotest.NoPackagesError
 	if errors.As(err, &noPackages) {
-		return fmt.Sprintf("%s: %v\nHint: run gopulse from a Go module that has packages, or set benchmark.packages in gopulse.yaml.", operation, err)
+		return fmt.Sprintf("%s: %v\nHint: run gopulse from a Go module that has packages. In multi-module repos, run it inside a service directory.", operation, err)
 	}
 
 	var noBenchmarks gotest.NoBenchmarksError
@@ -225,4 +229,48 @@ func status(ok bool) string {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+func findNestedModules(root string) []string {
+	var modules []string
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", "node_modules", "vendor":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "go.mod" || path == "go.mod" {
+			return nil
+		}
+		dir := filepath.Dir(path)
+		if strings.HasPrefix(dir, "."+string(os.PathSeparator)) {
+			dir = strings.TrimPrefix(dir, "."+string(os.PathSeparator))
+		}
+		modules = append(modules, dir)
+		return nil
+	})
+	return modules
+}
+
+func printNestedModuleHint(w io.Writer, modules []string) {
+	if len(modules) == 0 {
+		return
+	}
+
+	fmt.Fprintln(w, "Nested Go modules found. Try one of:")
+	limit := len(modules)
+	if limit > 5 {
+		limit = 5
+	}
+	for _, module := range modules[:limit] {
+		fmt.Fprintf(w, "  cd %s && gopulse doctor\n", module)
+	}
+	if len(modules) > limit {
+		fmt.Fprintf(w, "  ...and %d more\n", len(modules)-limit)
+	}
 }
