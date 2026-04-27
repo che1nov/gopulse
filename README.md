@@ -5,7 +5,7 @@
 ## Install
 
 ```bash
-go install github.com/che1nov/gopulse/cmd/gopulse@latest
+go install github.com/che1nov/gopulse/cmd/gopulse@v0.1.2
 ```
 
 For local development:
@@ -22,9 +22,19 @@ gopulse baseline save
 gopulse check
 gopulse report --format markdown
 gopulse doctor
+gopulse version
 ```
 
 `gopulse check` exits with code `1` when a regression is above the configured threshold.
+
+For repositories with several Go modules:
+
+```bash
+gopulse monorepo doctor
+gopulse monorepo run
+gopulse monorepo baseline save
+gopulse monorepo check
+```
 
 ## Try It
 
@@ -112,6 +122,14 @@ jobs:
         run: |
           go install github.com/che1nov/gopulse/cmd/gopulse@latest
           gopulse check
+```
+
+## Release
+
+Release builds set the CLI version through GoReleaser:
+
+```bash
+gopulse version
 ```
 
 ## Roadmap

@@ -8,7 +8,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/che1nov/gopulse/internal/adapters/gotest"
@@ -18,6 +17,8 @@ import (
 	"github.com/che1nov/gopulse/internal/usecases"
 	"github.com/che1nov/gopulse/pkg/logger"
 )
+
+var Version = "dev"
 
 func Run(args []string, stdout, stderr io.Writer) int {
 	log := logger.New(io.Discard, slog.LevelWarn)
@@ -49,6 +50,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return report(ctx, args[1:], cfg, checkRegression, stdout, stderr)
 	case "doctor":
 		return doctor(ctx, cfg, runner, store, stdout, stderr)
+	case "monorepo":
+		return monorepo(ctx, args[1:], stdout, stderr)
+	case "version":
+		fmt.Fprintf(stdout, "gopulse %s\n", Version)
+		return 0
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0
@@ -216,7 +222,12 @@ Usage:
   gopulse baseline save
   gopulse check [--format terminal|markdown|json]
   gopulse report --format markdown
-  gopulse doctor`)
+  gopulse doctor
+  gopulse monorepo doctor
+  gopulse monorepo run
+  gopulse monorepo baseline save
+  gopulse monorepo check
+  gopulse version`)
 }
 
 func status(ok bool) string {
@@ -229,48 +240,4 @@ func status(ok bool) string {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-func findNestedModules(root string) []string {
-	var modules []string
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "node_modules", "vendor":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.Name() != "go.mod" || path == "go.mod" {
-			return nil
-		}
-		dir := filepath.Dir(path)
-		if strings.HasPrefix(dir, "."+string(os.PathSeparator)) {
-			dir = strings.TrimPrefix(dir, "."+string(os.PathSeparator))
-		}
-		modules = append(modules, dir)
-		return nil
-	})
-	return modules
-}
-
-func printNestedModuleHint(w io.Writer, modules []string) {
-	if len(modules) == 0 {
-		return
-	}
-
-	fmt.Fprintln(w, "Nested Go modules found. Try one of:")
-	limit := len(modules)
-	if limit > 5 {
-		limit = 5
-	}
-	for _, module := range modules[:limit] {
-		fmt.Fprintf(w, "  cd %s && gopulse doctor\n", module)
-	}
-	if len(modules) > limit {
-		fmt.Fprintf(w, "  ...and %d more\n", len(modules)-limit)
-	}
 }

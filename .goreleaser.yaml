@@ -4,6 +4,8 @@ builds:
   - id: gopulse
     main: ./cmd/gopulse
     binary: gopulse
+    ldflags:
+      - -s -w -X github.com/che1nov/gopulse/internal/app.Version={{.Version}}
     goos:
       - linux
       - darwin
