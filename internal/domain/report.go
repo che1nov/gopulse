@@ -6,4 +6,5 @@ const (
 	ReportTerminal ReportFormat = "terminal"
 	ReportMarkdown ReportFormat = "markdown"
 	ReportJSON     ReportFormat = "json"
+	ReportHTML     ReportFormat = "html"
 )

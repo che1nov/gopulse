@@ -68,7 +68,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 func run(ctx context.Context, args []string, cfg usecases.Config, uc usecases.RunBenchmarks, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	format := fs.String("format", string(cfg.Output.Format), "output format: terminal, markdown, json")
+	format := fs.String("format", string(cfg.Output.Format), "output format: terminal, markdown, json, html")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -104,7 +104,7 @@ func baseline(ctx context.Context, args []string, cfg usecases.Config, runner us
 func check(ctx context.Context, args []string, cfg usecases.Config, uc usecases.CheckRegression, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	format := fs.String("format", string(cfg.Output.Format), "output format: terminal, markdown, json")
+	format := fs.String("format", string(cfg.Output.Format), "output format: terminal, markdown, json, html")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -127,7 +127,7 @@ func check(ctx context.Context, args []string, cfg usecases.Config, uc usecases.
 func report(ctx context.Context, args []string, cfg usecases.Config, uc usecases.CheckRegression, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("report", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	format := fs.String("format", "markdown", "output format: markdown, terminal, json")
+	format := fs.String("format", "markdown", "output format: markdown, terminal, json, html")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -209,6 +209,8 @@ func reporterFor(format domain.ReportFormat) reportPrinter {
 		return reporter.NewMarkdown()
 	case domain.ReportJSON:
 		return reporter.NewJSON()
+	case domain.ReportHTML:
+		return reporter.NewHTML()
 	default:
 		return reporter.NewTerminal()
 	}
@@ -218,10 +220,10 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, `gopulse checks performance health of Go projects.
 
 Usage:
-  gopulse run [--format terminal|markdown|json]
+  gopulse run [--format terminal|markdown|json|html]
   gopulse baseline save
-  gopulse check [--format terminal|markdown|json]
-  gopulse report --format markdown
+  gopulse check [--format terminal|markdown|json|html]
+  gopulse report --format markdown|html
   gopulse doctor
   gopulse monorepo doctor
   gopulse monorepo run

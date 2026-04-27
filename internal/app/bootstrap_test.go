@@ -127,6 +127,17 @@ output:
 	if !strings.Contains(checkOut.String(), "Result: OK") {
 		t.Fatalf("check stdout = %q", checkOut.String())
 	}
+
+	var reportOut, reportErr bytes.Buffer
+	reportCode := Run([]string{"report", "--format", "html"}, &reportOut, &reportErr)
+	if reportCode != 0 {
+		t.Fatalf("html report code = %d; stdout = %s; stderr = %s", reportCode, reportOut.String(), reportErr.String())
+	}
+	for _, want := range []string{"<!doctype html>", "Performance report", `class="bar"`} {
+		if !strings.Contains(reportOut.String(), want) {
+			t.Fatalf("html report stdout = %q, want %q", reportOut.String(), want)
+		}
+	}
 }
 
 func TestMonorepoWorkflow(t *testing.T) {
