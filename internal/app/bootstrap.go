@@ -2,14 +2,12 @@ package app
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
-	"go/parser"
-	"go/token"
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/che1nov/gopulse/internal/adapters/gotest"
@@ -21,7 +19,7 @@ import (
 )
 
 func Run(args []string, stdout, stderr io.Writer) int {
-	log := logger.New(stderr, slog.LevelWarn)
+	log := logger.New(io.Discard, slog.LevelWarn)
 	if len(args) == 0 {
 		printUsage(stderr)
 		return 2
@@ -49,7 +47,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "report":
 		return report(ctx, args[1:], cfg, checkRegression, stdout, stderr)
 	case "doctor":
-		return doctor(cfg, store, stdout, stderr)
+		return doctor(ctx, cfg, runner, store, stdout, stderr)
 	case "help", "-h", "--help":
 		printUsage(stdout)
 		return 0
@@ -70,7 +68,7 @@ func run(ctx context.Context, args []string, cfg usecases.Config, uc usecases.Ru
 
 	snapshot, err := uc.Execute(ctx, cfg)
 	if err != nil {
-		fmt.Fprintf(stderr, "%v\n", err)
+		fmt.Fprintln(stderr, formatCommandError("run benchmarks", err))
 		return 1
 	}
 	if err := reporterFor(domain.ReportFormat(*format)).PrintSnapshot(stdout, snapshot); err != nil {
@@ -89,7 +87,7 @@ func baseline(ctx context.Context, args []string, cfg usecases.Config, runner us
 	uc := usecases.NewSaveBaseline(runner, store, log.With("component", "usecase"))
 	snapshot, err := uc.Execute(ctx, cfg)
 	if err != nil {
-		fmt.Fprintf(stderr, "%v\n", err)
+		fmt.Fprintln(stderr, formatCommandError("save baseline", err))
 		return 1
 	}
 	fmt.Fprintf(stdout, "Baseline saved: %s (%d benchmarks)\n", cfg.BaselinePath, len(snapshot.Benchmarks))
@@ -106,7 +104,7 @@ func check(ctx context.Context, args []string, cfg usecases.Config, uc usecases.
 
 	result, err := uc.Execute(ctx, cfg)
 	if err != nil {
-		fmt.Fprintf(stderr, "%v\n", err)
+		fmt.Fprintln(stderr, formatCommandError("check regressions", err))
 		return 1
 	}
 	if err := reporterFor(domain.ReportFormat(*format)).PrintCheck(stdout, result); err != nil {
@@ -129,7 +127,7 @@ func report(ctx context.Context, args []string, cfg usecases.Config, uc usecases
 
 	result, err := uc.Execute(ctx, cfg)
 	if err != nil {
-		fmt.Fprintf(stderr, "%v\n", err)
+		fmt.Fprintln(stderr, formatCommandError("generate report", err))
 		return 1
 	}
 	if err := reporterFor(domain.ReportFormat(*format)).PrintCheck(stdout, result); err != nil {
@@ -139,23 +137,55 @@ func report(ctx context.Context, args []string, cfg usecases.Config, uc usecases
 	return 0
 }
 
-func doctor(cfg usecases.Config, store usecases.BaselineStorage, stdout, stderr io.Writer) int {
+func doctor(ctx context.Context, cfg usecases.Config, runner gotest.Runner, store usecases.BaselineStorage, stdout, stderr io.Writer) int {
 	moduleOK := fileExists("go.mod")
-	benchmarks := countBenchmarkFiles(".")
-	pprofFound := hasGoImport(".", "net/http/pprof") || hasGoImport(".", "runtime/pprof")
+	packages, packageErr := runner.Packages(ctx, cfg.Benchmark.Packages)
+	benchmarks, benchmarkErr := runner.BenchmarkFileCount(ctx, cfg.Benchmark.Packages)
+	pprofFound := runner.HasImport(ctx, cfg.Benchmark.Packages, "net/http/pprof") || runner.HasImport(ctx, cfg.Benchmark.Packages, "runtime/pprof")
 
 	fmt.Fprintf(stdout, "Go module: %s\n", status(moduleOK))
+	if packageErr != nil {
+		fmt.Fprintf(stdout, "Packages found: 0\n")
+	} else {
+		fmt.Fprintf(stdout, "Packages found: %d\n", len(packages))
+	}
 	fmt.Fprintf(stdout, "Benchmarks found: %d\n", benchmarks)
 	fmt.Fprintf(stdout, "Baseline found: %s\n", status(store.Exists(cfg.BaselinePath)))
 	fmt.Fprintln(stdout, "Benchmem enabled: OK")
 	fmt.Fprintf(stdout, "CI config: %s\n", status(fileExists(".github/workflows/performance.yml") || fileExists(".github/workflows/performance.yaml")))
 	fmt.Fprintf(stdout, "pprof usage: %s\n", status(pprofFound))
 
+	if packageErr != nil {
+		fmt.Fprintln(stderr, formatCommandError("inspect packages", packageErr))
+		return 1
+	}
+	if benchmarkErr != nil {
+		fmt.Fprintf(stderr, "inspect benchmarks: %v\n", benchmarkErr)
+		return 1
+	}
 	if !moduleOK || benchmarks == 0 {
 		fmt.Fprintln(stderr, "project is not ready for performance analysis")
 		return 1
 	}
 	return 0
+}
+
+func formatCommandError(operation string, err error) string {
+	var noPackages gotest.NoPackagesError
+	if errors.As(err, &noPackages) {
+		return fmt.Sprintf("%s: %v\nHint: run gopulse from a Go module that has packages, or set benchmark.packages in gopulse.yaml.", operation, err)
+	}
+
+	var noBenchmarks gotest.NoBenchmarksError
+	if errors.As(err, &noBenchmarks) {
+		return fmt.Sprintf("%s: %v\nHint: add BenchmarkXxx functions to *_test.go files, then run gopulse baseline save.", operation, err)
+	}
+
+	if os.IsNotExist(err) && strings.Contains(err.Error(), ".gopulse/baseline.json") {
+		return fmt.Sprintf("%s: baseline not found at .gopulse/baseline.json\nHint: run gopulse baseline save first.", operation)
+	}
+
+	return fmt.Sprintf("%s: %v", operation, err)
 }
 
 type reportPrinter interface {
@@ -195,57 +225,4 @@ func status(ok bool) string {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-func countBenchmarkFiles(root string) int {
-	count := 0
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			if d != nil && d.Name() == ".git" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if strings.HasSuffix(path, "_test.go") && containsFile(path, "func Benchmark") {
-			count++
-		}
-		return nil
-	})
-	return count
-}
-
-func hasGoImport(root, importPath string) bool {
-	found := false
-	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
-		if found || err != nil || d.IsDir() {
-			if d != nil && d.Name() == ".git" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if strings.HasSuffix(path, ".go") && fileImports(path, importPath) {
-			found = true
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	return found
-}
-
-func fileImports(path, importPath string) bool {
-	file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
-	if err != nil {
-		return false
-	}
-	for _, spec := range file.Imports {
-		if strings.Trim(spec.Path.Value, `"`) == importPath {
-			return true
-		}
-	}
-	return false
-}
-
-func containsFile(path, needle string) bool {
-	data, err := os.ReadFile(path)
-	return err == nil && strings.Contains(string(data), needle)
 }
