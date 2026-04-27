@@ -1,0 +1,12 @@
+benchmark:
+  packages:
+    - ./...
+  count: 3
+  timeout: 5m
+thresholds:
+  ns_per_op: 15
+  bytes_per_op: 20
+  allocs_per_op: 10
+output:
+  format: terminal
+  fail_on_regression: true

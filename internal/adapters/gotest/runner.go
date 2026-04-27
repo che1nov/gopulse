@@ -18,6 +18,7 @@ import (
 )
 
 var benchLineRE = regexp.MustCompile(`^(Benchmark\S+)\s+\d+\s+([\d.]+)\s+ns/op(?:\s+([\d.]+)\s+B/op)?(?:\s+([\d.]+)\s+allocs/op)?`)
+var benchFuncRE = regexp.MustCompile(`func\s+Benchmark[A-Za-z0-9_]*\s*\(`)
 
 type Runner struct {
 	workDir string
@@ -114,9 +115,7 @@ func (r Runner) BenchmarkFileCount(ctx context.Context, patterns []string) (int,
 			if name == "" {
 				continue
 			}
-			if containsFile(filepath.Join(dir, name), "func Benchmark") {
-				count++
-			}
+			count += countBenchmarks(filepath.Join(dir, name))
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -245,4 +244,12 @@ func averageBenchmarks(benchmarks []domain.Benchmark) []domain.Benchmark {
 func containsFile(path, needle string) bool {
 	data, err := os.ReadFile(path)
 	return err == nil && strings.Contains(string(data), needle)
+}
+
+func countBenchmarks(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	return len(benchFuncRE.FindAll(data, -1))
 }

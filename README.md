@@ -26,6 +26,18 @@ gopulse doctor
 
 `gopulse check` exits with code `1` when a regression is above the configured threshold.
 
+## Try It
+
+This repository includes a small benchmark target:
+
+```bash
+cd examples/demo-service
+gopulse doctor
+gopulse run
+gopulse baseline save
+gopulse check
+```
+
 ## Example Output
 
 ```text
