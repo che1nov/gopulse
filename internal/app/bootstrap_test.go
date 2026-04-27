@@ -133,7 +133,7 @@ output:
 	if reportCode != 0 {
 		t.Fatalf("html report code = %d; stdout = %s; stderr = %s", reportCode, reportOut.String(), reportErr.String())
 	}
-	for _, want := range []string{"<!doctype html>", "Performance report", `class="bar"`} {
+	for _, want := range []string{"<!doctype html>", "Performance report", `class="bar"`, "<span>benchmarks</span>", "<span>regressions</span>"} {
 		if !strings.Contains(reportOut.String(), want) {
 			t.Fatalf("html report stdout = %q, want %q", reportOut.String(), want)
 		}
